@@ -1,0 +1,13 @@
+vm
+.vscode
+
+src/*.a
+src/*.o
+src/*.ko
+src/*.cmd
+src/*.mod
+src/*.mod.c
+src/[Mm]odule*
+
+*.qcow2
+*.iso
