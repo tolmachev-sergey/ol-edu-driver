@@ -12,7 +12,7 @@ $installImg = "vm\disk.iso"
 # 5. create 'edu' device
 
 qemu-system-x86_64.exe `
-    -nographic -M q35,accel=$accel -m $memory `
+    -display gtk -M q35,accel=$accel -m $memory `
     -nic user,hostfwd=tcp:127.0.0.1:2222-:22 `
     -drive file=$hddImg,format=qcow2,media=disk `
     -drive file=$installImg,media=cdrom `
