@@ -3,6 +3,7 @@
 #include <linux/kernel.h>
 #include <linux/pci.h>
 #include <linux/cdev.h>
+#include <linux/interrupt.h>
 
 #include <edu.h>
 
@@ -52,6 +53,7 @@ struct edu_device {
 
 static struct class *edu_class;
 static atomic_t n_devices = ATOMIC_INIT(0);  /* total amount of devices created */
+static bool factorial_calculating_flag = false;
 
 static long edu_do_xor(struct edu_device *edu, unsigned long arg)
 {
@@ -70,9 +72,27 @@ static long edu_do_xor(struct edu_device *edu, unsigned long arg)
     return 0;
 }
 
+
 static long edu_do_factorial(struct edu_device *edu, unsigned long arg)
 {
-    return -ENXIO;
+    struct edu_factorial_cmd __user *cmd = (void __user *)(arg);
+    u32 val_in;
+    u32 EDU_STATUS_val_in;
+
+    if (get_user(val_in, &cmd->val_in))
+        return -EINVAL;
+
+    if (factorial_calculating_flag)
+        return -EBUSY;
+
+    EDU_STATUS_val_in = ioread32(edu->map + EDU_STATUS);
+    EDU_STATUS_val_in |= 0x80;
+    iowrite32(EDU_STATUS_val_in, edu->map + EDU_STATUS);
+
+    factorial_calculating_flag = true;
+    iowrite32(val_in, edu->map + EDU_FACTORIAL);
+
+    return 0;
 }
 
 static long edu_do_intr(struct edu_device *edu, unsigned long arg)
@@ -199,12 +219,23 @@ static irqreturn_t edu_irq(int irq, void *data)
     u32 status;
 
     status = ioread32(edu->map + EDU_INTR_STATUS);
-    if (!status)
+    if (status) {
+        u32 edu_st = ioread32(edu->map + EDU_STATUS);
+        if (factorial_calculating_flag && (edu_st & 0x01) == 0) {
+            u32 val_out = ioread32(edu->map + EDU_FACTORIAL);
+            log_info("Factorial = (%d)", val_out);
+            iowrite32(status, edu->map + EDU_INTR_ACK);
+            factorial_calculating_flag = false;
+        } else {
+            log_info("%s: got interrupted (%x)", pci_name(dev), status);
+            iowrite32(status, edu->map + EDU_INTR_ACK);
+        }
+    }
+    else {
         return IRQ_NONE;
+    }
 
-    log_info("%s: got interrupted (%x)", pci_name(dev), status);
     iowrite32(status, edu->map + EDU_INTR_ACK);
-
     return IRQ_HANDLED;
 }
 
@@ -273,7 +304,7 @@ static int edu_probe(struct pci_dev *dev, const struct pci_device_id *id)
     rc = pci_alloc_irq_vectors(dev, 1, 1, PCI_IRQ_LEGACY);
 #else
     rc = pci_alloc_irq_vectors(dev, 1, 1, PCI_IRQ_MSI);
-#endif 
+#endif
     if (rc < 0) {
         log_error("%s: failed to allocate IRQ (rc = %d)", pci_name(dev), rc);
         goto err_free_region;

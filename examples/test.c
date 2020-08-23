@@ -12,6 +12,7 @@ int main(int argc, char *argv[])
     int fd, rc;
     struct edu_xor_cmd cmd_xor;
     struct edu_intr_cmd cmd_intr;
+    struct edu_factorial_cmd cmd_factor;
     
     fd = open("/dev/edu0", O_RDWR);
     if (fd == -1) {
@@ -19,13 +20,20 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    cmd_factor.val_in = 0xa;
+    rc = ioctl(fd, EDU_IOCTL_FACTORIAL, &cmd_factor);
+    if (rc) {
+        printf("EDU_IOCTL_FACTORIAL failed (rc = %d)\n", rc);
+        return 1;
+    }
+    printf("check dmesg fot 'Factorial=' message...\n");
+
     cmd_xor.val_in = 0x0;
     rc = ioctl(fd, EDU_IOCTL_XOR, &cmd_xor);
     if (rc) {
         printf("EDU_IOCTL_XOR failed (rc = %d)\n", rc);
         return 1;
     }
-
     printf("cmd_xor.val_out = 0x%08"PRIx32"\n", cmd_xor.val_out);
 
     cmd_intr.val_in = 0xdeadf00d;
@@ -34,7 +42,6 @@ int main(int argc, char *argv[])
         printf("EDU_IOCTL_INTR failed (rc = %d)\n", rc);
         return 1;
     }
-
     printf("check dmesg fot 'got interrupted' message...\n");
 
     return 0;
