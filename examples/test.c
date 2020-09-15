@@ -26,7 +26,7 @@ int main(int argc, char *argv[])
         printf("EDU_IOCTL_FACTORIAL failed (rc = %d)\n", rc);
         return 1;
     }
-    printf("check dmesg fot 'Factorial=' message...\n");
+    printf("Factorial = %d\n", cmd_factor.val_out);
 
     cmd_xor.val_in = 0x0;
     rc = ioctl(fd, EDU_IOCTL_XOR, &cmd_xor);

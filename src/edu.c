@@ -1,9 +1,9 @@
 #include <linux/init.h>
-#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
 #include <linux/cdev.h>
 #include <linux/interrupt.h>
+#include <linux/module.h>
 
 #include <edu.h>
 
@@ -49,11 +49,14 @@ struct edu_device {
     struct mutex lock;
     unsigned open_count;
     struct device *dev;
+    bool calculating;
 };
+
+
+static DECLARE_WAIT_QUEUE_HEAD(wq);
 
 static struct class *edu_class;
 static atomic_t n_devices = ATOMIC_INIT(0);  /* total amount of devices created */
-static bool factorial_calculating_flag = false;
 
 static long edu_do_xor(struct edu_device *edu, unsigned long arg)
 {
@@ -72,8 +75,7 @@ static long edu_do_xor(struct edu_device *edu, unsigned long arg)
     return 0;
 }
 
-
-static long edu_do_factorial(struct edu_device *edu, unsigned long arg)
+static long edu_do_factorial(struct edu_device *edu, unsigned long arg, struct file *file)
 {
     struct edu_factorial_cmd __user *cmd = (void __user *)(arg);
     u32 val_in;
@@ -82,15 +84,18 @@ static long edu_do_factorial(struct edu_device *edu, unsigned long arg)
     if (get_user(val_in, &cmd->val_in))
         return -EINVAL;
 
-    if (factorial_calculating_flag)
-        return -EBUSY;
-
     EDU_STATUS_val_in = ioread32(edu->map + EDU_STATUS);
     EDU_STATUS_val_in |= 0x80;
     iowrite32(EDU_STATUS_val_in, edu->map + EDU_STATUS);
 
-    factorial_calculating_flag = true;
+    edu->calculating = true;
     iowrite32(val_in, edu->map + EDU_FACTORIAL);
+    wait_event_interruptible(wq, edu->calculating == false);
+
+    u32 val_out = ioread32(edu->map + EDU_FACTORIAL);
+
+    if (put_user(val_out, &cmd->val_out))
+        return -EINVAL;
 
     return 0;
 }
@@ -118,7 +123,7 @@ static long edu_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             return edu_do_xor(edu, arg);
 
         case EDU_IOCTL_FACTORIAL:
-            return edu_do_factorial(edu, arg);
+            return edu_do_factorial(edu, arg, file);
 
         case EDU_IOCTL_INTR:
             return edu_do_intr(edu, arg);
@@ -221,11 +226,11 @@ static irqreturn_t edu_irq(int irq, void *data)
     status = ioread32(edu->map + EDU_INTR_STATUS);
     if (status) {
         u32 edu_st = ioread32(edu->map + EDU_STATUS);
-        if (factorial_calculating_flag && (edu_st & 0x01) == 0) {
-            u32 val_out = ioread32(edu->map + EDU_FACTORIAL);
-            log_info("Factorial = (%d)", val_out);
+        if (edu->calculating && (edu_st & 0x01) == 0) {
             iowrite32(status, edu->map + EDU_INTR_ACK);
-            factorial_calculating_flag = false;
+            edu->calculating = false;
+            wake_up_interruptible(&wq);
+
         } else {
             log_info("%s: got interrupted (%x)", pci_name(dev), status);
             iowrite32(status, edu->map + EDU_INTR_ACK);
